@@ -1,6 +1,11 @@
 """
-server.py - Qoo10 최저가 매칭 시스템 백엔드
+server.py - Qoo10 최저가 매칭 시스템 백엔드 v2
 Flask + Playwright로 Qoo10 카탈로그 실제 스크래핑
+
+Qoo10 카탈로그 페이지 구조 (2026.02 기준):
+  - "公式ショップ" 섹션: 공식 셀러
+  - "ショップ（送料込みの価額が安い順）" 섹션: 전체 셀러 리스트
+  - 각 셀러 행: [公式] 셀러명 | メガポ時 가격円 | 送料無料
 """
 import asyncio
 import json
@@ -18,9 +23,6 @@ from flask_cors import CORS
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
 
-# ============================================================
-# DATABASE
-# ============================================================
 DB_PATH = 'data/price_history.db'
 os.makedirs('data', exist_ok=True)
 
@@ -29,48 +31,31 @@ def init_db():
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS price_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                catalog_no INTEGER NOT NULL,
-                seller_name TEXT NOT NULL,
-                price INTEGER NOT NULL,
-                rank INTEGER,
+                catalog_no INTEGER NOT NULL, seller_name TEXT NOT NULL,
+                price INTEGER NOT NULL, rank INTEGER,
                 scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS price_changes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                catalog_no INTEGER NOT NULL,
-                old_price INTEGER,
-                new_price INTEGER,
-                reason TEXT,
-                applied BOOLEAN DEFAULT 0,
+                catalog_no INTEGER NOT NULL, old_price INTEGER, new_price INTEGER,
+                reason TEXT, applied BOOLEAN DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            CREATE INDEX IF NOT EXISTS idx_snap ON price_snapshots(catalog_no, scraped_at);
-            CREATE INDEX IF NOT EXISTS idx_chg ON price_changes(catalog_no, created_at);
         """)
 
 @contextmanager
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+    try: yield conn; conn.commit()
+    finally: conn.close()
 
 # ============================================================
-# SCRAPER - Playwright (async)
+# SCRAPER
 # ============================================================
 _browser = None
 _playwright = None
-_loop = None
 _lock = threading.Lock()
-
-def get_event_loop():
-    global _loop
-    if _loop is None or _loop.is_closed():
-        _loop = asyncio.new_event_loop()
-    return _loop
 
 async def _init_browser():
     global _browser, _playwright
@@ -78,17 +63,15 @@ async def _init_browser():
         from playwright.async_api import async_playwright
         _playwright = await async_playwright().start()
         _browser = await _playwright.chromium.launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-dev-shm-usage']
+            headless=True, args=['--no-sandbox', '--disable-dev-shm-usage']
         )
         print("[OK] Playwright 브라우저 초기화 완료")
 
 async def _scrape_catalog(catalog_no):
     """Qoo10 카탈로그 페이지에서 셀러별 가격 추출"""
     await _init_browser()
-
-    url = f"https://www.qoo10.jp/gmkt.inc/catalog/goods/goods.aspx?catalogno={catalog_no}&ga_priority=-1&ga_prdlist=srp"
-    print(f"[SCRAPE] #{catalog_no} 스크래핑 시작: {url}")
+    url = f"https://www.qoo10.jp/gmkt.inc/catalog/goods/goods.aspx?catalogno={catalog_no}"
+    print(f"\n[SCRAPE] #{catalog_no} 시작: {url}")
 
     page = await _browser.new_page(
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -97,365 +80,250 @@ async def _scrape_catalog(catalog_no):
     sellers = []
     try:
         await page.goto(url, wait_until="networkidle", timeout=30000)
+        await page.wait_for_timeout(5000)
 
-        # 페이지 로딩 대기 (동적 콘텐츠)
-        await page.wait_for_timeout(3000)
+        # 스크린샷 저장 (디버그)
+        await page.screenshot(path=f"data/page_{catalog_no}.png", full_page=True)
 
-        # 방법 1: JavaScript로 셀러 리스트 추출
-        sellers = await page.evaluate("""
-            () => {
-                const results = [];
+        # ============================================
+        # 방법 1: 페이지 텍스트 기반 파싱
+        # ============================================
+        page_text = await page.evaluate("() => document.body.innerText")
+        with open(f"data/text_{catalog_no}.txt", "w", encoding="utf-8") as f:
+            f.write(page_text)
+        print(f"[DEBUG] 텍스트 길이: {len(page_text)}")
 
-                // Qoo10 카탈로그 셀러 리스트 - 다양한 셀렉터 시도
-                const selectors = [
-                    // 카탈로그 상품 리스트
-                    '.catalog_goods_list .item, .catalog_goods_list li',
-                    '.cata_goods_list .item, .cata_goods_list li',
-                    '#catalogGoodsList li, #catalog_goods_list li',
-                    // 테이블 형식
-                    '.tbl_catalog_goods tbody tr',
-                    '.catalog_seller_list tr',
-                    // 일반적인 상품 리스트
-                    '.goods_list li, .goods_list .item',
-                    '.prd_list li, .prd_list .item',
-                    // 가격 비교 영역
-                    '[class*="catalog"] [class*="item"]',
-                    '[class*="catalog"] [class*="goods"]',
-                    '[id*="catalog"] li',
-                ];
+        # "ショップ（送料込み" 섹션 찾기
+        shop_idx = -1
+        for marker in ["ショップ（送料込み", "ショップ(送料込み"]:
+            shop_idx = page_text.find(marker)
+            if shop_idx >= 0:
+                break
 
-                for (const sel of selectors) {
-                    const items = document.querySelectorAll(sel);
-                    if (items.length === 0) continue;
+        if shop_idx >= 0:
+            section = page_text[shop_idx:]
+            print(f"[DEBUG] 셀러 섹션 발견")
+        else:
+            section = page_text
+            print(f"[DEBUG] 셀러 섹션 마커 미발견, 전체 텍스트 사용")
 
-                    items.forEach((item) => {
-                        // 가격 추출
-                        let price = 0;
-                        const priceEls = item.querySelectorAll(
-                            '[class*="price"] em, [class*="price"] strong, [class*="prc"] em, ' +
-                            '.price em, .prc em, .sell_price em, .sale_price em, strong.price, ' +
-                            '[class*="Price"], em.price, .txt_price em'
-                        );
-                        for (const el of priceEls) {
-                            const txt = el.textContent.replace(/[^0-9]/g, '');
-                            const p = parseInt(txt);
-                            if (p > 50 && p < 500000) { price = p; break; }
-                        }
-                        // 대체: 엔 기호 포함 텍스트
-                        if (!price) {
-                            const allText = item.textContent;
-                            const m = allText.match(/([\d,]+)\s*円/) || allText.match(/¥\s*([\d,]+)/);
-                            if (m) price = parseInt(m[1].replace(/,/g, ''));
-                        }
+        # 줄 단위 파싱
+        lines = [l.strip() for l in section.split('\n') if l.strip()]
 
-                        // 셀러명 추출
-                        let name = '';
-                        const nameEls = item.querySelectorAll(
-                            '[class*="seller"], [class*="shop"], .seller_name, .shop_name, ' +
-                            'a[href*="shop"], a[href*="seller"], [class*="Seller"], [class*="Shop"]'
-                        );
-                        for (const el of nameEls) {
-                            const n = el.textContent.trim();
-                            if (n.length > 0 && n.length < 50) { name = n; break; }
-                        }
+        # 셀러 이름 후보를 모아두고, 바로 다음에 나오는 가격과 매칭
+        # Qoo10 구조: 셀러명 → (メガポ時) → 가격円 → 送料
+        seller_name_candidate = ""
+        for line in lines:
+            # 가격 패턴: "2,200円" 또는 "2,444円"
+            price_match = re.search(r'^([\d,]+)\s*円', line) or re.search(r'([\d,]+)\s*円', line)
 
-                        // 상품 링크에서 상품코드 추출
-                        let itemCode = '';
-                        const links = item.querySelectorAll('a[href]');
-                        for (const l of links) {
-                            const match = l.href.match(/goodscode=([A-Za-z0-9]+)/i) ||
-                                          l.href.match(/g\/([A-Za-z0-9]+)/i);
-                            if (match) { itemCode = match[1]; break; }
-                        }
+            if price_match:
+                price = int(price_match.group(1).replace(',', ''))
+                if 100 <= price <= 500000 and seller_name_candidate:
+                    # 중복 방지
+                    if not any(s['name'] == seller_name_candidate and s['price'] == price for s in sellers):
+                        sellers.append({'name': seller_name_candidate, 'price': price, 'itemCode': ''})
+                        print(f"  [발견] {seller_name_candidate}: ¥{price:,}")
+                    seller_name_candidate = ""
+                continue
 
-                        if (price > 0) {
-                            results.push({ name: name || '알수없음', price, itemCode });
-                        }
-                    });
+            # メガポ時, 送料, ショップ割 등은 건너뜀
+            skip_words = ['メガポ時', 'ショップ割', 'Q-ONLY', '送料無料', '送料有料',
+                          '公式ショップ', 'ショップ（', '全クーポン', '最安値', 'TOP',
+                          '比較リスト', 'シェア', 'お気に入り', 'ブランド', 'レビュー',
+                          '件の', '保湿', 'テクスチャー', 'ボディクリ', 'ボディケア',
+                          'ビューティー', 'カテゴリ', '検索', 'ログイン', 'カート',
+                          'ヘルプ', 'ランキング', 'タイムセール', '円~', '円～']
+            if any(w in line for w in skip_words):
+                continue
 
-                    if (results.length > 0) break;
-                }
+            # 숫자만으로 된 줄 건너뜀
+            if re.match(r'^[\d,.\s]+$', line):
+                continue
 
-                // 방법 2: 전체 페이지에서 가격 패턴 스캔 (fallback)
-                if (results.length === 0) {
-                    // 스크립트 태그에서 JSON 데이터 탐색
-                    const scripts = document.querySelectorAll('script');
-                    for (const script of scripts) {
-                        const text = script.textContent;
-                        // Qoo10의 내부 데이터 구조 검색
-                        const patterns = [
-                            /"[Ss]eller[Nn]ame"\s*:\s*"([^"]+)"[^}]*"[Pp]rice"\s*:\s*["]?(\d+)/g,
-                            /"[Ss]hop[Nn]ame"\s*:\s*"([^"]+)"[^}]*"[Ss]ell[Pp]rice"\s*:\s*["]?(\d+)/g,
-                        ];
-                        for (const pat of patterns) {
-                            let m;
-                            while ((m = pat.exec(text)) !== null) {
-                                results.push({ name: m[1], price: parseInt(m[2]), itemCode: '' });
+            # 짧은 텍스트(1글자) 건너뜀
+            if len(line) <= 1:
+                continue
+
+            # 이것이 셀러명 후보
+            # "公式" 태그 제거
+            clean = re.sub(r'^公式\s*', '', line).strip()
+            if clean and 2 <= len(clean) <= 40:
+                seller_name_candidate = clean
+
+        # ============================================
+        # 방법 2: "公式ショップ" 섹션도 별도 파싱
+        # ============================================
+        official_idx = page_text.find("公式ショップ")
+        if official_idx >= 0 and shop_idx >= 0:
+            official_section = page_text[official_idx:shop_idx]
+            off_lines = [l.strip() for l in official_section.split('\n') if l.strip()]
+            off_name = ""
+            for line in off_lines:
+                price_match = re.search(r'([\d,]+)\s*円', line)
+                if price_match:
+                    price = int(price_match.group(1).replace(',', ''))
+                    if 100 <= price <= 500000 and off_name:
+                        if not any(s['name'] == off_name for s in sellers):
+                            sellers.append({'name': off_name, 'price': price, 'itemCode': ''})
+                            print(f"  [공식] {off_name}: ¥{price:,}")
+                    continue
+                clean = re.sub(r'^公式\s*', '', line).strip()
+                skip = ['メガポ時', '送料', 'ショップ割', 'Q-ONLY', '公式ショップ']
+                if not any(w in clean for w in skip) and 2 <= len(clean) <= 40:
+                    off_name = clean
+
+        # ============================================
+        # 방법 3: DOM에서 직접 추출 (방법1,2 실패 시)
+        # ============================================
+        if not sellers:
+            print("[DEBUG] 텍스트 파싱 실패, DOM 탐색...")
+            sellers = await page.evaluate("""
+                () => {
+                    const results = [];
+                    // 모든 요소에서 가격+셀러 패턴 찾기
+                    const allEls = document.querySelectorAll('div, li, tr, section, article');
+                    for (const el of allEls) {
+                        if (el.children.length > 10) continue; // 너무 큰 컨테이너 스킵
+                        const text = el.innerText || '';
+                        if (text.length > 300) continue;
+                        
+                        const priceMatch = text.match(/([\d,]+)\s*円/);
+                        if (!priceMatch) continue;
+                        const price = parseInt(priceMatch[1].replace(/,/g, ''));
+                        if (price < 100 || price > 500000) continue;
+                        
+                        // 셀러명 추출: 가격/송료 등 제거
+                        let name = text
+                            .replace(/メガポ時|ショップ割|Q-ONLY|公式/g, '')
+                            .replace(/([\d,]+)\s*円/g, '')
+                            .replace(/送料無料|送料有料/g, '')
+                            .replace(/[\\n\\r\\t]+/g, ' ')
+                            .trim();
+                        
+                        if (name.length >= 2 && name.length <= 35) {
+                            if (!results.some(r => r.name === name && r.price === price)) {
+                                results.push({ name, price, itemCode: '' });
                             }
                         }
-                        if (results.length > 0) break;
                     }
+                    return results;
                 }
+            """)
 
-                // 방법 3: 모든 가격 표시 요소 수집
-                if (results.length === 0) {
-                    const allPriceEls = document.querySelectorAll(
-                        '.goods_price, .item_price, [class*="goods_price"], [class*="item_price"]'
-                    );
-                    allPriceEls.forEach((el, idx) => {
-                        const txt = el.textContent.replace(/[^0-9]/g, '');
-                        const p = parseInt(txt);
-                        if (p > 50 && p < 500000) {
-                            // 부모에서 셀러명 찾기
-                            let parent = el.closest('li, tr, div[class*="item"], div[class*="goods"]');
-                            let name = '';
-                            if (parent) {
-                                const nameEl = parent.querySelector('[class*="seller"], [class*="shop"]');
-                                if (nameEl) name = nameEl.textContent.trim();
-                            }
-                            results.push({ name: name || `셀러${idx+1}`, price: p, itemCode: '' });
-                        }
-                    });
-                }
+        # 결과 정리
+        if sellers:
+            seen = {}
+            for s in sellers:
+                key = s['name'].strip()
+                if key not in seen or s['price'] < seen[key]['price']:
+                    seen[key] = s
+            sellers = sorted(seen.values(), key=lambda x: x['price'])
+            for i, s in enumerate(sellers, 1):
+                s['rank'] = i
+            print(f"\n[결과] #{catalog_no}: {len(sellers)}개 셀러")
+            for s in sellers:
+                print(f"  {s['rank']}위 {s['name']}: ¥{s['price']:,}")
+        else:
+            print(f"\n[실패] #{catalog_no}: 셀러 없음")
+            print(f"  디버그: data/page_{catalog_no}.png / data/text_{catalog_no}.txt")
 
-                return results;
-            }
-        """)
-
-        # 방법 4: Qoo10 내부 AJAX API 시도
-        if not sellers:
-            print(f"[SCRAPE] #{catalog_no} JS 추출 실패, AJAX API 시도...")
-            try:
-                api_result = await page.evaluate(f"""
-                    async () => {{
-                        try {{
-                            const resp = await fetch(
-                                '/GMKT.INC/Catalog/CatalogHandler.ashx?method=GetCatalogSellerList&catalogNo={catalog_no}',
-                                {{ credentials: 'include' }}
-                            );
-                            return await resp.text();
-                        }} catch(e) {{
-                            return null;
-                        }}
-                    }}
-                """)
-                if api_result and len(api_result) > 5:
-                    try:
-                        data = json.loads(api_result)
-                        items = data if isinstance(data, list) else data.get('Items', data.get('ResultObject', []))
-                        for item in items:
-                            name = item.get('SellerName') or item.get('ShopName') or 'unknown'
-                            price = item.get('Price') or item.get('SellPrice') or item.get('SellingPrice', 0)
-                            if isinstance(price, str):
-                                price = int(price.replace(',', ''))
-                            if price > 0:
-                                sellers.append({'name': name, 'price': int(price), 'itemCode': item.get('GoodsCode', '')})
-                    except json.JSONDecodeError:
-                        pass
-            except Exception as e:
-                print(f"[SCRAPE] AJAX API 에러: {e}")
-
-        # 방법 5: 페이지 HTML에서 정규식으로 추출
-        if not sellers:
-            print(f"[SCRAPE] #{catalog_no} AJAX도 실패, HTML 정규식 시도...")
-            html = await page.content()
-
-            # Qoo10의 data-* 속성이나 인라인 데이터에서 가격 추출
-            price_patterns = [
-                r'"goodsPrice"\s*:\s*"?(\d+)"?.*?"sellerNick"\s*:\s*"([^"]+)"',
-                r'"sellerNick"\s*:\s*"([^"]+)".*?"goodsPrice"\s*:\s*"?(\d+)"?',
-                r'data-price="(\d+)"[^>]*data-seller="([^"]+)"',
-            ]
-            for pat in price_patterns:
-                for m in re.finditer(pat, html, re.DOTALL):
-                    groups = m.groups()
-                    if groups[0].isdigit():
-                        sellers.append({'name': groups[1], 'price': int(groups[0]), 'itemCode': ''})
-                    else:
-                        sellers.append({'name': groups[0], 'price': int(groups[1]), 'itemCode': ''})
-
-        # 스크린샷 저장 (디버깅용)
-        if not sellers:
-            screenshot_path = f"data/debug_{catalog_no}.png"
-            await page.screenshot(path=screenshot_path, full_page=True)
-            print(f"[SCRAPE] #{catalog_no} 데이터 없음. 스크린샷: {screenshot_path}")
-
-            # 마지막 시도: 페이지 텍스트에서 가격 패턴
-            text_content = await page.evaluate("() => document.body.innerText")
-            lines = text_content.split('\n')
-            for line in lines:
-                # "셀러명    ¥1,234" 또는 "1,234円" 패턴
-                m = re.search(r'¥\s*([\d,]+)', line) or re.search(r'([\d,]+)\s*円', line)
-                if m:
-                    price = int(m.group(1).replace(',', ''))
-                    if 100 < price < 100000:
-                        # 같은 줄에서 셀러명 후보
-                        name_part = line[:line.find(m.group(0))].strip()
-                        if not name_part:
-                            name_part = f"셀러"
-                        sellers.append({'name': name_part[:30], 'price': price, 'itemCode': ''})
-
-        print(f"[SCRAPE] #{catalog_no} 결과: {len(sellers)}개 셀러")
         return sellers
 
     except Exception as e:
-        print(f"[ERROR] #{catalog_no} 스크래핑 에러: {e}")
-        # 에러 시에도 스크린샷
-        try:
-            await page.screenshot(path=f"data/error_{catalog_no}.png")
-        except:
-            pass
+        print(f"[ERROR] #{catalog_no}: {e}")
+        try: await page.screenshot(path=f"data/error_{catalog_no}.png")
+        except: pass
         return []
     finally:
         await page.close()
 
-
 def scrape_catalog_sync(catalog_no):
-    """동기 래퍼"""
     with _lock:
-        loop = get_event_loop()
-        return loop.run_until_complete(_scrape_catalog(catalog_no))
-
+        loop = asyncio.new_event_loop()
+        try: return loop.run_until_complete(_scrape_catalog(catalog_no))
+        finally: loop.close()
 
 # ============================================================
 # API ROUTES
 # ============================================================
-
 @app.route('/')
 def index():
     return send_from_directory('.', 'index.html')
 
 @app.route('/api/scrape/<int:catalog_no>')
 def api_scrape(catalog_no):
-    """단일 카탈로그 스크래핑"""
     try:
         sellers = scrape_catalog_sync(catalog_no)
-
-        # 중복 제거 + 정렬
-        seen = {}
-        for s in sellers:
-            key = s['name'].lower().strip()
-            if key not in seen or s['price'] < seen[key]['price']:
-                seen[key] = s
-        sellers = sorted(seen.values(), key=lambda x: x['price'])
-
-        # 순위 부여
-        for i, s in enumerate(sellers, 1):
-            s['rank'] = i
-
-        # DB 저장
         if sellers:
             with get_db() as conn:
                 for s in sellers:
-                    conn.execute(
-                        "INSERT INTO price_snapshots (catalog_no, seller_name, price, rank) VALUES (?,?,?,?)",
-                        (catalog_no, s['name'], s['price'], s['rank'])
-                    )
-
+                    conn.execute("INSERT INTO price_snapshots (catalog_no,seller_name,price,rank) VALUES (?,?,?,?)",
+                        (catalog_no, s['name'], s['price'], s['rank']))
         return jsonify({'success': True, 'sellers': sellers, 'count': len(sellers)})
-
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'sellers': []})
 
-
 @app.route('/api/scrape-all', methods=['POST'])
 def api_scrape_all():
-    """여러 카탈로그 일괄 스크래핑"""
     data = request.json
-    catalogs = data.get('catalogs', [])
     results = {}
-
-    for cat in catalogs:
-        catalog_no = cat.get('catalogNo')
-        if not catalog_no:
-            continue
+    for cat in data.get('catalogs', []):
+        cno = cat.get('catalogNo')
+        if not cno: continue
         try:
-            sellers = scrape_catalog_sync(catalog_no)
-
-            seen = {}
-            for s in sellers:
-                key = s['name'].lower().strip()
-                if key not in seen or s['price'] < seen[key]['price']:
-                    seen[key] = s
-            sellers = sorted(seen.values(), key=lambda x: x['price'])
-            for i, s in enumerate(sellers, 1):
-                s['rank'] = i
-
+            sellers = scrape_catalog_sync(cno)
             if sellers:
                 with get_db() as conn:
                     for s in sellers:
-                        conn.execute(
-                            "INSERT INTO price_snapshots (catalog_no, seller_name, price, rank) VALUES (?,?,?,?)",
-                            (catalog_no, s['name'], s['price'], s['rank'])
-                        )
-
-            results[catalog_no] = {'success': True, 'sellers': sellers}
-            time.sleep(2)  # 요청 간격
-
+                        conn.execute("INSERT INTO price_snapshots (catalog_no,seller_name,price,rank) VALUES (?,?,?,?)",
+                            (cno, s['name'], s['price'], s['rank']))
+            results[cno] = {'success': True, 'sellers': sellers}
+            time.sleep(2)
         except Exception as e:
-            results[catalog_no] = {'success': False, 'error': str(e), 'sellers': []}
-
+            results[cno] = {'success': False, 'error': str(e), 'sellers': []}
     return jsonify(results)
-
 
 @app.route('/api/history/<int:catalog_no>')
 def api_history(catalog_no):
-    """가격 이력 조회"""
     days = request.args.get('days', 7, type=int)
     since = (datetime.now() - timedelta(days=days)).isoformat()
     with get_db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM price_changes WHERE catalog_no=? AND created_at>=? ORDER BY created_at DESC",
-            (catalog_no, since)
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM price_changes WHERE catalog_no=? AND created_at>=? ORDER BY created_at DESC",
+            (catalog_no, since)).fetchall()
         return jsonify([dict(r) for r in rows])
-
 
 @app.route('/api/price-change', methods=['POST'])
 def api_price_change():
-    """가격 변경 기록"""
     data = request.json
     with get_db() as conn:
-        conn.execute(
-            "INSERT INTO price_changes (catalog_no, old_price, new_price, reason, applied) VALUES (?,?,?,?,?)",
-            (data['catalogNo'], data.get('oldPrice'), data['newPrice'], data.get('reason', ''), data.get('applied', False))
-        )
+        conn.execute("INSERT INTO price_changes (catalog_no,old_price,new_price,reason,applied) VALUES (?,?,?,?,?)",
+            (data['catalogNo'], data.get('oldPrice'), data['newPrice'], data.get('reason',''), data.get('applied',False)))
     return jsonify({'success': True})
-
-
-@app.route('/api/recent-drops/<int:catalog_no>')
-def api_recent_drops(catalog_no):
-    """24시간 내 인하 횟수"""
-    since = (datetime.now() - timedelta(hours=24)).isoformat()
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) as cnt FROM price_changes WHERE catalog_no=? AND applied=1 AND new_price<old_price AND created_at>=?",
-            (catalog_no, since)
-        ).fetchone()
-        return jsonify({'count': row['cnt'] if row else 0})
-
 
 @app.route('/api/debug/<int:catalog_no>')
 def api_debug(catalog_no):
-    """디버그 스크린샷 조회"""
-    for prefix in ['debug', 'error']:
-        path = f"data/{prefix}_{catalog_no}.png"
+    ft = request.args.get('type', 'png')
+    if ft == 'txt':
+        path = f"data/text_{catalog_no}.txt"
         if os.path.exists(path):
-            return send_from_directory('data', f"{prefix}_{catalog_no}.png")
-    return jsonify({'error': 'no screenshot'}), 404
+            with open(path, 'r', encoding='utf-8') as f:
+                return f.read(), 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    else:
+        for prefix in ['page', 'error']:
+            path = f"data/{prefix}_{catalog_no}.png"
+            if os.path.exists(path):
+                return send_from_directory('data', f"{prefix}_{catalog_no}.png")
+    return jsonify({'error': 'not found'}), 404
 
-
-# ============================================================
-# MAIN
 # ============================================================
 if __name__ == '__main__':
     init_db()
     print("\n" + "="*50)
-    print("  Qoo10 최저가 매칭 시스템 서버")
-    print("  http://localhost:5000")
+    print("  🏷️  Qoo10 최저가 매칭 시스템 서버 v2")
+    print("  📡 http://localhost:5000")
+    print("="*50)
+    print("  디버그: data/page_{번호}.png, data/text_{번호}.txt")
     print("="*50 + "\n")
-
-    # 1.5초 후 브라우저 자동 열기
     threading.Timer(1.5, lambda: webbrowser.open('http://localhost:5000')).start()
-
     app.run(host='0.0.0.0', port=5000, debug=False)
