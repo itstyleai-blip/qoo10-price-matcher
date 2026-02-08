@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qoo10 최저가 매칭 시스템 - TheKple</title>
+<style>
+:root{--primary:#7c3aed;--primary-light:#a78bfa;--accent:#f59e0b;--success:#10b981;--danger:#ef4444;--warning:#f97316;--info:#3b82f6;--bg:#f8f7ff;--card:#fff;--text:#1e1b4b;--text-light:#6b7280;--border:#e5e7eb;--shadow:0 2px 12px rgba(124,58,237,0.08);--shadow-lg:0 8px 32px rgba(124,58,237,0.12);--radius:12px;--radius-sm:8px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
+.header{background:linear-gradient(135deg,#7c3aed 0%,#a78bfa 40%,#c4b5fd 60%,#fbbf24 100%);padding:40px 20px 30px;text-align:center;position:relative;overflow:hidden}
+.header::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle,rgba(255,255,255,0.1) 0%,transparent 50%);animation:hs 8s ease-in-out infinite}
+@keyframes hs{0%,100%{transform:translateX(-10%) translateY(-10%)}50%{transform:translateX(10%) translateY(10%)}}
+.header-icon{font-size:42px;position:relative}.header h1{font-size:28px;font-weight:800;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.15);position:relative}.header p{color:rgba(255,255,255,.9);font-size:15px;margin-top:6px;position:relative}
+.toolbar{background:rgba(255,255,255,.85);backdrop-filter:blur(10px);margin:-15px 40px 0;padding:12px 24px;border-radius:var(--radius);display:flex;align-items:center;justify-content:center;gap:12px;box-shadow:var(--shadow-lg);position:relative;z-index:10;flex-wrap:wrap}
+.toolbar .status{font-size:13px;color:var(--text-light)}.toolbar .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--success);margin-right:4px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;transition:all .2s}
+.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.15)}.btn:active{transform:translateY(0)}.btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.btn-primary{background:var(--primary);color:#fff}.btn-success{background:var(--success);color:#fff}.btn-warning{background:var(--accent);color:#fff}.btn-danger{background:var(--danger);color:#fff}
+.btn-outline{background:#fff;color:var(--primary);border:1.5px solid var(--primary)}.btn-sm{padding:5px 12px;font-size:12px}.btn-lg{padding:12px 28px;font-size:15px}
+.tabs-container{max-width:1300px;margin:24px auto 0;padding:0 20px}.tabs{display:flex;border-bottom:2px solid var(--border);overflow-x:auto}
+.tab{padding:14px 22px;font-size:14px;font-weight:600;color:var(--text-light);cursor:pointer;border-bottom:3px solid transparent;transition:all .2s;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.tab:hover{color:var(--primary);background:rgba(124,58,237,.04)}.tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+.content{max-width:1300px;margin:0 auto;padding:24px 20px 60px}.tab-panel{display:none}.tab-panel.active{display:block;animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:24px;margin-bottom:20px;border:1px solid rgba(124,58,237,.06)}
+.card-title{font-size:18px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:24px;text-align:center;border:1px solid rgba(124,58,237,.06);transition:transform .2s}
+.stat-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}.stat-label{font-size:13px;color:var(--text-light);margin-bottom:8px}.stat-value{font-size:36px;font-weight:800}
+.stat-value.purple{color:var(--primary)}.stat-value.green{color:var(--success)}.stat-value.orange{color:var(--accent)}.stat-value.red{color:var(--danger)}.stat-value.blue{color:var(--info)}
+.table-wrapper{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#f9fafb;padding:12px 14px;text-align:left;font-weight:700;color:var(--text-light);border-bottom:2px solid var(--border);white-space:nowrap}
+td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:middle}tr:hover td{background:rgba(124,58,237,.02)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700}
+.badge-rank1{background:#fef3c7;color:#92400e}.badge-hold{background:#d1fae5;color:#065f46}.badge-undercut{background:#dbeafe;color:#1e40af}
+.badge-alert{background:#fef3c7;color:#92400e}.badge-blocked{background:#fee2e2;color:#991b1b}.badge-our{background:#ede9fe;color:#5b21b6;border:1.5px solid #a78bfa}
+.form-group{margin-bottom:16px}.form-label{display:block;font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+.form-input,.form-select{width:100%;padding:10px 14px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:14px;color:var(--text);background:#fff;transition:border-color .2s}
+.form-input:focus,.form-select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(124,58,237,.1)}
+.form-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}.form-help{font-size:11px;color:var(--text-light);margin-top:4px}
+.form-inline{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:1000;justify-content:center;align-items:center}
+.modal-overlay.show{display:flex}.modal{background:#fff;border-radius:var(--radius);padding:30px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:mi .3s ease}
+@keyframes mi{from{opacity:0;transform:scale(.95) translateY(10px)}}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}.modal-header h3{font-size:18px;font-weight:700}
+.modal-close{width:32px;height:32px;border:none;background:#f3f4f6;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center}
+.log-area{background:#1e1b4b;color:#a5f3fc;border-radius:var(--radius-sm);padding:16px;font-family:'Consolas','Courier New',monospace;font-size:12px;max-height:400px;overflow-y:auto;line-height:1.8}
+.log-area .log-time{color:#818cf8}.log-area .log-info{color:#34d399}.log-area .log-warn{color:#fbbf24}.log-area .log-error{color:#f87171}.log-area .log-action{color:#c084fc;font-weight:bold}
+.price-bar{display:flex;align-items:center;gap:8px;margin:4px 0}
+.price-bar-fill{height:26px;border-radius:4px;display:flex;align-items:center;padding:0 10px;font-size:11px;font-weight:700;color:#fff;min-width:50px;transition:width .5s ease}
+.price-bar-name{font-size:12px;min-width:120px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price-bar-price{font-size:13px;font-weight:700;min-width:70px}
+.toggle-wrapper{display:flex;align-items:center;gap:10px}.toggle{position:relative;width:48px;height:26px;cursor:pointer}.toggle input{display:none}
+.toggle-slider{position:absolute;inset:0;background:#d1d5db;border-radius:26px;transition:.3s}
+.toggle-slider::before{content:'';position:absolute;width:20px;height:20px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.3s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.toggle input:checked+.toggle-slider{background:var(--primary)}.toggle input:checked+.toggle-slider::before{transform:translateX(22px)}.toggle-label{font-size:13px;font-weight:600}
+.progress-bar{width:100%;height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden;margin:8px 0}.progress-fill{height:100%;background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:3px;transition:width .3s}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media(max-width:768px){.toolbar{margin:-15px 15px 0;padding:10px 16px}.stats-row{grid-template-columns:repeat(2,1fr)}.header h1{font-size:22px}.form-row{grid-template-columns:1fr}}
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+</head>
+<body>
+
+<div class="header">
+  <div class="header-icon">🏷️</div>
+  <h1>Qoo10 최저가 매칭 시스템</h1>
+  <p>TheKple 스토어 자동 가격 모니터링 및 최저가 유지 솔루션</p>
+</div>
+
+<div class="toolbar">
+  <span class="status"><span class="dot" id="statusDot"></span><span id="statusText">대기 중</span></span>
+  <button class="btn btn-outline" onclick="switchTab('settings')">⚙️ 설정</button>
+  <button class="btn btn-primary" onclick="saveAllData()">💾 저장</button>
+  <button class="btn btn-success" id="btnRun" onclick="runMonitoring()">🔍 모니터링 실행</button>
+  <button class="btn btn-warning" onclick="stopMonitoring()">⏹ 중지</button>
+</div>
+
+<div class="tabs-container">
+  <div class="tabs">
+    <div class="tab active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 대시보드</div>
+    <div class="tab" data-tab="catalogs" onclick="switchTab('catalogs')">📦 카탈로그 관리</div>
+    <div class="tab" data-tab="monitoring" onclick="switchTab('monitoring')">🔍 가격 모니터링</div>
+    <div class="tab" data-tab="history" onclick="switchTab('history')">📈 가격 이력</div>
+    <div class="tab" data-tab="settings" onclick="switchTab('settings')">⚙️ 설정</div>
+  </div>
+</div>
+
+<div class="content">
+  <!-- 대시보드 -->
+  <div class="tab-panel active" id="panel-dashboard">
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-label">등록 카탈로그</div><div class="stat-value purple" id="stat-catalogs">0</div></div>
+      <div class="stat-card"><div class="stat-label">최저가 1위</div><div class="stat-value green" id="stat-rank1">0</div></div>
+      <div class="stat-card"><div class="stat-label">가격 조정 필요</div><div class="stat-value orange" id="stat-needs">0</div></div>
+      <div class="stat-card"><div class="stat-label">경고</div><div class="stat-value red" id="stat-alerts">0</div></div>
+      <div class="stat-card"><div class="stat-label">오늘 변경</div><div class="stat-value blue" id="stat-changes">0</div></div>
+    </div>
+    <div id="progressArea" style="display:none" class="card">
+      <div class="card-title">🔄 모니터링 진행 중...</div>
+      <div id="progressText" style="font-size:13px;color:var(--text-light);margin-bottom:4px">준비 중...</div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 카탈로그 현황</div>
+      <div class="table-wrapper">
+        <table><thead><tr><th>카탈로그</th><th>상품명</th><th>순위</th><th>우리 가격</th><th>1위 가격</th><th>차이</th><th>상태</th><th>확인시간</th></tr></thead>
+        <tbody id="dashboardBody"><tr><td colspan="8" style="text-align:center;color:var(--text-light);padding:40px">모니터링을 실행하세요</td></tr></tbody></table>
+      </div>
+    </div>
+    <div class="card"><div class="card-title">📊 실시간 로그</div><div class="log-area" id="logArea"><div><span class="log-time">[시스템]</span> 서버 연결 확인 중...</div></div></div>
+  </div>
+
+  <!-- 카탈로그 관리 -->
+  <div class="tab-panel" id="panel-catalogs">
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between"><span>📦 카탈로그 관리</span><button class="btn btn-primary btn-sm" onclick="openAddCatalog()">➕ 추가</button></div>
+      <div class="table-wrapper">
+        <table><thead><tr><th>번호</th><th>상품명</th><th>상품코드</th><th>바닥가</th><th>언더컷</th><th>활성</th><th>관리</th></tr></thead>
+        <tbody id="catalogBody"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 가격 모니터링 -->
+  <div class="tab-panel" id="panel-monitoring">
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between">
+        <span>🔍 모니터링 결과</span>
+        <button class="btn btn-success btn-sm" onclick="runMonitoring()">🔄 새로고침</button>
+      </div>
+      <div id="monitorResults"><div style="text-align:center;color:var(--text-light);padding:40px">모니터링을 실행하면 결과가 표시됩니다</div></div>
+    </div>
+  </div>
+
+  <!-- 가격 이력 -->
+  <div class="tab-panel" id="panel-history">
+    <div class="card">
+      <div class="card-title"><span>📈 가격 변동 이력</span></div>
+      <div class="table-wrapper">
+        <table><thead><tr><th>일시</th><th>카탈로그</th><th>상품명</th><th>이전</th><th>변경</th><th>변동</th><th>사유</th><th>적용</th></tr></thead>
+        <tbody id="historyBody"><tr><td colspan="8" style="text-align:center;color:var(--text-light);padding:40px">이력 없음</td></tr></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 설정 -->
+  <div class="tab-panel" id="panel-settings">
+    <div class="card">
+      <div class="card-title">🏪 스토어 정보</div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">스토어명</label><input class="form-input" id="set-storeName" value="thekple"><div class="form-help">Qoo10 셀러 리스트에서 식별할 이름</div></div>
+        <div class="form-group"><label class="form-label">Qoo10 API Key (선택)</label><input class="form-input" id="set-apiKey" type="password" placeholder="없으면 수동 변경"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">💰 가격 전략</div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">기본 언더컷 (¥)</label><input class="form-input" id="set-undercut" type="number" value="1" min="1"></div>
+        <div class="form-group"><label class="form-label">최대 하락 허용 (¥)</label><input class="form-input" id="set-maxDrop" type="number" value="200"></div>
+        <div class="form-group"><label class="form-label">24시간 최대 인하 횟수</label><input class="form-input" id="set-maxDrops" type="number" value="3"></div>
+      </div>
+      <div style="margin-top:12px"><div class="toggle-wrapper"><label class="toggle"><input type="checkbox" id="set-dryRun" checked><span class="toggle-slider"></span></label><span class="toggle-label">Dry-Run 모드 (실제 변경 안 함)</span></div></div>
+    </div>
+    <div style="text-align:center;margin-top:20px">
+      <button class="btn btn-primary btn-lg" onclick="saveSettings()">💾 설정 저장</button>
+      <button class="btn btn-outline btn-lg" style="margin-left:12px" onclick="exportAll()">📤 백업</button>
+      <button class="btn btn-outline btn-lg" style="margin-left:12px" onclick="importAll()">📥 불러오기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 카탈로그 추가 모달 -->
+<div class="modal-overlay" id="modalAdd">
+  <div class="modal">
+    <div class="modal-header"><h3>📦 카탈로그 추가</h3><button class="modal-close" onclick="closeModal('modalAdd')">✕</button></div>
+    <div class="form-group"><label class="form-label">카탈로그 번호 *</label><input class="form-input" id="add-no" type="number" placeholder="32917"><div class="form-help">Qoo10 URL의 catalogno= 값</div></div>
+    <div class="form-group"><label class="form-label">상품명 *</label><input class="form-input" id="add-name" placeholder="マデカバリアボディローション 500ml"></div>
+    <div class="form-group"><label class="form-label">상품코드</label><input class="form-input" id="add-code" placeholder="KPLE-001"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">바닥가 (¥) *</label><input class="form-input" id="add-floor" type="number"></div>
+      <div class="form-group"><label class="form-label">언더컷 (¥)</label><input class="form-input" id="add-uc" type="number" value="1"></div>
+    </div>
+    <div style="text-align:right;margin-top:20px">
+      <button class="btn btn-outline" onclick="closeModal('modalAdd')">취소</button>
+      <button class="btn btn-primary" style="margin-left:8px" onclick="addCatalog()">추가</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:5000/api';
+let state = {
+  settings:{storeName:'thekple',apiKey:'',undercut:1,maxDrop:200,maxDrops:3,dryRun:true},
+  catalogs:[{catalogNo:32917,productName:'マデカバリアボディローション 500ml',itemCode:'KPLE-001',floorPrice:1200,undercut:1,active:true}],
+  results:[], history:[], lastRun:null
+};
+let isMonitoring=false, timer=null;
+
+function load(){try{const s=localStorage.getItem('q10pm3');if(s)state={...state,...JSON.parse(s)};}catch(e){}applyUI();renderAll();checkServer();}
+function save(){try{localStorage.setItem('q10pm3',JSON.stringify(state));}catch(e){}}
+
+async function checkServer(){
+  try{const r=await fetch(API+'/scrape/0',{signal:AbortSignal.timeout(3000)});addLog('info','✅ 백엔드 서버 연결 확인');}
+  catch(e){addLog('error','❌ 백엔드 서버 미연결! python server.py를 먼저 실행하세요');addLog('warn','  → pip install flask flask-cors playwright');addLog('warn','  → playwright install chromium');addLog('warn','  → python server.py');}
+}
+
+// === TABS ===
+function switchTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.querySelector(`.tab[data-tab="${id}"]`)?.classList.add('active');document.getElementById(`panel-${id}`)?.classList.add('active');}
+function openModal(id){document.getElementById(id).classList.add('show');}function closeModal(id){document.getElementById(id).classList.remove('show');}
+
+// === CATALOG ===
+function openAddCatalog(){['add-no','add-name','add-code','add-floor'].forEach(id=>document.getElementById(id).value='');document.getElementById('add-uc').value='1';openModal('modalAdd');}
+function addCatalog(){
+  const no=parseInt(document.getElementById('add-no').value),name=document.getElementById('add-name').value.trim(),floor=parseInt(document.getElementById('add-floor').value);
+  if(!no||!name||!floor){alert('번호,상품명,바닥가 필수');return;}if(state.catalogs.some(c=>c.catalogNo===no)){alert('이미 등록됨');return;}
+  state.catalogs.push({catalogNo:no,productName:name,itemCode:document.getElementById('add-code').value.trim()||`KPLE-${no}`,floorPrice:floor,undercut:parseInt(document.getElementById('add-uc').value)||1,active:true});
+  save();renderCatalogs();closeModal('modalAdd');addLog('info',`카탈로그 추가: #${no}`);
+}
+function removeCatalog(no){if(!confirm(`#${no} 삭제?`))return;state.catalogs=state.catalogs.filter(c=>c.catalogNo!==no);save();renderCatalogs();}
+function toggleCatalog(no){const c=state.catalogs.find(x=>x.catalogNo===no);if(c){c.active=!c.active;save();renderCatalogs();}}
+function renderCatalogs(){
+  const tb=document.getElementById('catalogBody');document.getElementById('stat-catalogs').textContent=state.catalogs.length;
+  if(!state.catalogs.length){tb.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--text-light);padding:30px">카탈로그 없음</td></tr>';return;}
+  tb.innerHTML=state.catalogs.map(c=>`<tr style="opacity:${c.active?1:.5}"><td><strong>${c.catalogNo}</strong></td><td>${c.productName}</td>
+  <td><code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:12px">${c.itemCode}</code></td><td>¥${c.floorPrice.toLocaleString()}</td><td>¥${c.undercut}</td>
+  <td><label class="toggle" style="width:40px;height:22px"><input type="checkbox" ${c.active?'checked':''} onchange="toggleCatalog(${c.catalogNo})"><span class="toggle-slider"></span></label></td>
+  <td><button class="btn btn-outline btn-sm" onclick="window.open('https://www.qoo10.jp/gmkt.inc/catalog/goods/goods.aspx?catalogno=${c.catalogNo}','_blank')">🔗</button> <button class="btn btn-danger btn-sm" onclick="removeCatalog(${c.catalogNo})">🗑️</button></td></tr>`).join('');
+}
+
+// === MONITORING (실제 서버 호출) ===
+async function runMonitoring(){
+  const active=state.catalogs.filter(c=>c.active);
+  if(!active.length){addLog('error','활성 카탈로그 없음');return;}
+  if(isMonitoring){addLog('warn','이미 실행 중');return;}
+  isMonitoring=true;document.getElementById('btnRun').disabled=true;
+  setStatus('monitoring','모니터링 중...');
+  document.getElementById('progressArea').style.display='block';
+  addLog('action',`=== 모니터링 시작: ${active.length}개 ===`);
+  state.results=[];
+
+  for(let i=0;i<active.length;i++){
+    const cat=active[i];
+    document.getElementById('progressFill').style.width=Math.round(i/active.length*100)+'%';
+    document.getElementById('progressText').textContent=`(${i+1}/${active.length}) #${cat.catalogNo} ${cat.productName} 스크래핑 중... (Playwright)`;
+    addLog('info',`🔍 #${cat.catalogNo} ${cat.productName} 실제 스크래핑...`);
+
+    try{
+      const resp=await fetch(`${API}/scrape/${cat.catalogNo}`);
+      const data=await resp.json();
+
+      if(data.success && data.sellers && data.sellers.length>0){
+        addLog('info',`  ✅ ${data.sellers.length}개 셀러 발견`);
+        data.sellers.forEach(s=>{ s.isOurs = s.name.toLowerCase().includes(state.settings.storeName.toLowerCase()); });
+        const result=analyze(cat, data.sellers);
+        state.results.push(result);
+        const em={HOLD:'✅',UNDERCUT:'💰',ALERT:'⚠️',BLOCKED:'🛑'}[result.action]||'📋';
+        addLog(result.action==='HOLD'?'info':result.action==='UNDERCUT'?'action':'warn',`  ${em} [${result.action}] ${result.reason}`);
+        if(result.action==='UNDERCUT'&&result.recPrice) state.history.unshift({ts:new Date().toISOString(),catNo:cat.catalogNo,name:cat.productName,old:result.curPrice,new:result.recPrice,reason:result.reason,applied:!state.settings.dryRun});
+      } else {
+        addLog('warn',`  ⚠️ 셀러 데이터 없음 (페이지 구조가 JS로 로딩 중일 수 있음)`);
+        if(data.error) addLog('error',`  에러: ${data.error}`);
+        state.results.push({catNo:cat.catalogNo,name:cat.productName,rank:null,curPrice:null,topSeller:'N/A',topPrice:0,recPrice:null,action:'ALERT',reason:'셀러 데이터 조회 실패 - 디버그 스크린샷 확인: /api/debug/'+cat.catalogNo,sellers:[]});
+      }
+    }catch(e){
+      addLog('error',`  ❌ 서버 에러: ${e.message}`);
+      state.results.push({catNo:cat.catalogNo,name:cat.productName,rank:null,curPrice:null,topSeller:'N/A',topPrice:0,recPrice:null,action:'ALERT',reason:`서버 연결 실패: ${e.message}`,sellers:[]});
+    }
+  }
+
+  document.getElementById('progressFill').style.width='100%';
+  document.getElementById('progressText').textContent='완료!';
+  setTimeout(()=>document.getElementById('progressArea').style.display='none',2000);
+
+  state.lastRun=new Date().toISOString();isMonitoring=false;document.getElementById('btnRun').disabled=false;
+  const r1=state.results.filter(r=>r.action==='HOLD'&&r.rank===1).length;
+  const needs=state.results.filter(r=>r.action==='UNDERCUT').length;
+  const alerts=state.results.filter(r=>['ALERT','BLOCKED'].includes(r.action)).length;
+  document.getElementById('stat-rank1').textContent=r1;document.getElementById('stat-needs').textContent=needs;document.getElementById('stat-alerts').textContent=alerts;
+  document.getElementById('stat-changes').textContent=state.history.filter(h=>h.ts?.startsWith(new Date().toISOString().slice(0,10))).length;
+  setStatus('done',`완료 (${new Date().toLocaleTimeString()})`);
+  addLog('action',`=== 완료: 1위:${r1} 조정:${needs} 경고:${alerts} ===`);
+  save();renderAll();
+}
+
+function analyze(cat,sellers){
+  sellers.sort((a,b)=>a.price-b.price);sellers.forEach((s,i)=>s.rank=i+1);
+  const our=sellers.find(s=>s.isOurs), comps=sellers.filter(s=>!s.isOurs), top=comps[0];
+  if(!top)return{catNo:cat.catalogNo,name:cat.productName,rank:our?.rank,curPrice:our?.price,topSeller:'없음',topPrice:0,recPrice:our?.price,action:'HOLD',reason:'경쟁 없음',sellers};
+  if(!our)return{catNo:cat.catalogNo,name:cat.productName,rank:null,curPrice:null,topSeller:top.name,topPrice:top.price,recPrice:Math.max(top.price-cat.undercut,cat.floorPrice),action:'ALERT',reason:`"${state.settings.storeName}" 미발견. 1위:${top.name}(¥${top.price})`,sellers};
+  if(our.rank===1)return{catNo:cat.catalogNo,name:cat.productName,rank:1,curPrice:our.price,topSeller:top.name,topPrice:top.price,recPrice:our.price,action:'HOLD',reason:`이미 1위! 우리:¥${our.price} vs 2위:¥${top.price} (차이:¥${top.price-our.price})`,sellers};
+  const target=top.price-cat.undercut;
+  if(target<cat.floorPrice)return{catNo:cat.catalogNo,name:cat.productName,rank:our.rank,curPrice:our.price,topSeller:top.name,topPrice:top.price,recPrice:cat.floorPrice,action:'ALERT',reason:`바닥가 도달! 목표¥${target}<바닥¥${cat.floorPrice}. 1위:${top.name}=¥${top.price}`,sellers};
+  if(our.price-target>state.settings.maxDrop)return{catNo:cat.catalogNo,name:cat.productName,rank:our.rank,curPrice:our.price,topSeller:top.name,topPrice:top.price,recPrice:Math.max(our.price-state.settings.maxDrop,cat.floorPrice),action:'ALERT',reason:`급락! ¥${our.price}→¥${target}(${our.price-target}엔) 최대¥${state.settings.maxDrop}허용`,sellers};
+  return{catNo:cat.catalogNo,name:cat.productName,rank:our.rank,curPrice:our.price,topSeller:top.name,topPrice:top.price,recPrice:target,action:'UNDERCUT',reason:`1위 ${top.name}(¥${top.price}) 대비 ¥${cat.undercut} 언더컷 → ¥${target} (현재:¥${our.price})`,sellers};
+}
+
+function stopMonitoring(){if(timer){clearTimeout(timer);timer=null;}isMonitoring=false;document.getElementById('btnRun').disabled=false;setStatus('idle','중지');addLog('warn','중지');}
+
+// === RENDER ===
+function renderAll(){renderCatalogs();renderDashboard();renderMonitor();renderHistory();}
+function renderDashboard(){
+  document.getElementById('stat-catalogs').textContent=state.catalogs.length;
+  const tb=document.getElementById('dashboardBody');
+  if(!state.results.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text-light);padding:40px">모니터링을 실행하세요</td></tr>';return;}
+  tb.innerHTML=state.results.map(r=>{
+    const d=r.curPrice&&r.topPrice?r.curPrice-r.topPrice:0;
+    const ds=d>0?`+¥${d}`:d<0?`-¥${Math.abs(d)}`:'—';
+    const dc=d>0?'var(--danger)':d<0?'var(--success)':'var(--text-light)';
+    const bc={HOLD:'badge-hold',UNDERCUT:'badge-undercut',ALERT:'badge-alert',BLOCKED:'badge-blocked'}[r.action]||'';
+    const al={HOLD:'✅유지',UNDERCUT:'💰조정',ALERT:'⚠️경고',BLOCKED:'🛑차단'}[r.action]||r.action;
+    return`<tr><td><strong>${r.catNo}</strong></td><td>${r.name}</td><td>${r.rank?`${r.rank}위`:'-'}</td><td>¥${r.curPrice?.toLocaleString()||'-'}</td><td>¥${r.topPrice?.toLocaleString()||'-'}</td><td style="color:${dc};font-weight:700">${ds}</td><td><span class="badge ${bc}">${al}</span></td><td style="font-size:12px;color:var(--text-light)">${state.lastRun?new Date(state.lastRun).toLocaleTimeString():'-'}</td></tr>`;
+  }).join('');
+}
+function renderMonitor(){
+  const c=document.getElementById('monitorResults');
+  if(!state.results.length){c.innerHTML='<div style="text-align:center;color:var(--text-light);padding:40px">실행 대기</div>';return;}
+  c.innerHTML=state.results.map(r=>{
+    if(!r.sellers?.length)return`<div class="card"><strong>#${r.catNo} ${r.name}</strong> — ${r.reason}</div>`;
+    const mx=Math.max(...r.sellers.map(s=>s.price));
+    const bars=r.sellers.map(s=>{
+      const w=Math.max(20,(s.price/mx)*100);const o=s.isOurs;
+      const cl=o?'var(--primary)':s.rank===1?'var(--success)':'#94a3b8';
+      return`<div class="price-bar"><span class="price-bar-name">${o?'⭐ ':''}${s.name}</span><div class="price-bar-fill" style="width:${w}%;background:${cl}">${s.rank}위</div><span class="price-bar-price" style="${o?'color:var(--primary)':''}">¥${s.price.toLocaleString()}</span>${o?'<span class="badge badge-our">OUR</span>':''}</div>`;
+    }).join('');
+    const bc={HOLD:'badge-hold',UNDERCUT:'badge-undercut',ALERT:'badge-alert',BLOCKED:'badge-blocked'}[r.action];
+    const al={HOLD:'✅유지',UNDERCUT:'💰조정',ALERT:'⚠️경고',BLOCKED:'🛑차단'}[r.action];
+    return`<div class="card" style="margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px"><div><strong>#${r.catNo} ${r.name}</strong> <span class="badge ${bc}" style="margin-left:8px">${al}</span></div>${r.recPrice&&r.action==='UNDERCUT'?`<button class="btn btn-warning btn-sm" onclick="alert('${state.settings.dryRun?'[Dry-Run] ':''}¥${r.recPrice}으로 변경${state.settings.dryRun?' (시뮬레이션)':''}')">${state.settings.dryRun?'🔍':'✅'} → ¥${r.recPrice.toLocaleString()}</button>`:''}</div>
+    <div style="font-size:13px;color:var(--text-light);margin-bottom:12px">📝 ${r.reason}</div>
+    <div style="background:#f9fafb;border-radius:8px;padding:12px"><div style="font-size:12px;font-weight:700;color:var(--text-light);margin-bottom:8px">셀러별 가격 (${r.sellers.length}개)</div>${bars}</div></div>`;
+  }).join('');
+}
+function renderHistory(){
+  const tb=document.getElementById('historyBody');
+  if(!state.history.length){tb.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text-light);padding:40px">이력 없음</td></tr>';return;}
+  tb.innerHTML=state.history.slice(0,50).map(h=>{const d=(h.old||0)-(h.new||0);const ds=d>0?`↓¥${d}`:d<0?`↑¥${Math.abs(d)}`:'-';const dc=d>0?'var(--success)':d<0?'var(--danger)':'var(--text-light)';const dt=new Date(h.ts);
+  return`<tr><td style="font-size:12px">${dt.toLocaleDateString()} ${dt.toLocaleTimeString()}</td><td><strong>${h.catNo}</strong></td><td>${h.name}</td><td>¥${h.old?.toLocaleString()||'-'}</td><td><strong>¥${h.new?.toLocaleString()||'-'}</strong></td><td style="color:${dc};font-weight:700">${ds}</td><td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${h.reason||''}</td><td><span class="badge ${h.applied?'badge-hold':'badge-alert'}">${h.applied?'적용':'Dry-run'}</span></td></tr>`;}).join('');
+}
+
+// === SETTINGS ===
+function applyUI(){const s=state.settings;document.getElementById('set-storeName').value=s.storeName||'';document.getElementById('set-apiKey').value=s.apiKey||'';document.getElementById('set-undercut').value=s.undercut||1;document.getElementById('set-maxDrop').value=s.maxDrop||200;document.getElementById('set-maxDrops').value=s.maxDrops||3;document.getElementById('set-dryRun').checked=s.dryRun!==false;}
+function saveSettings(){state.settings={storeName:document.getElementById('set-storeName').value.trim(),apiKey:document.getElementById('set-apiKey').value.trim(),undercut:parseInt(document.getElementById('set-undercut').value)||1,maxDrop:parseInt(document.getElementById('set-maxDrop').value)||200,maxDrops:parseInt(document.getElementById('set-maxDrops').value)||3,dryRun:document.getElementById('set-dryRun').checked};save();addLog('info','설정 저장');}
+function saveAllData(){saveSettings();save();addLog('info','전체 저장');}
+function exportAll(){const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`q10_backup_${new Date().toISOString().slice(0,10)}.json`;a.click();}
+function importAll(){const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{state={...state,...JSON.parse(ev.target.result)};save();applyUI();renderAll();}catch(e){alert('오류');}};r.readAsText(f);};i.click();}
+
+// === UTILS ===
+function addLog(t,m){const a=document.getElementById('logArea');const tm=new Date().toLocaleTimeString();const c={info:'log-info',warn:'log-warn',error:'log-error',action:'log-action'}[t]||'log-info';a.innerHTML+=`<div><span class="log-time">[${tm}]</span> <span class="${c}">${m}</span></div>`;a.scrollTop=a.scrollHeight;}
+function setStatus(s,t){document.getElementById('statusText').textContent=t;document.getElementById('statusDot').style.background={idle:'#9ca3af',monitoring:'#f59e0b',done:'#10b981',error:'#ef4444'}[s]||'#9ca3af';}
+
+load();
+</script>
+</body>
+</html>
